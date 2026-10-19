@@ -1,0 +1,62 @@
+# =============================================================================
+# SIMULATED "central" reusable BUILD workflow.
+# Mirrors your real uipath-build.yml, but builds a DUMMY file instead of a bot,
+# so it runs in any personal account with no UiPath tools.
+#
+# Real concept being rehearsed:
+#   - "on: workflow_call" makes this callable by other workflows (reuse).
+#   - Build ONCE, compute a SHA-256, publish it as evidence.
+#   - Return outputs (version, hash, artifact name) back to the caller.
+# =============================================================================
+
+name: sim-build
+
+on:
+  workflow_call:                 # <-- this is what makes it reusable
+    inputs:
+      version-mode:
+        description: "release or prerelease"
+        type: string
+        default: release
+    outputs:                     # <-- values handed back to the caller
+      package-version:
+        description: "The version we built"
+        value: ${{ jobs.build.outputs.package-version }}
+      sha256:
+        description: "Checksum of the built file"
+        value: ${{ jobs.build.outputs.sha256 }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package-version: ${{ steps.make.outputs.version }}
+      sha256: ${{ steps.make.outputs.sha256 }}
+    steps:
+      - name: Build a dummy package (stands in for the real .nupkg)
+        id: make
+        run: |
+          # Compute a version like 1.4.<run-number>, mirroring the real design.
+          VERSION="1.4.${{ github.run_number }}"
+          if [ "${{ inputs.version-mode }}" = "prerelease" ]; then
+            VERSION="${VERSION}-dev.$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          echo "Building version $VERSION"
+
+          mkdir -p out
+          echo "pretend bot package, version $VERSION" > "out/package-$VERSION.txt"
+
+          # SHA-256 = the fingerprint that proves "same bytes" later.
+          HASH=$(sha256sum "out/package-$VERSION.txt" | cut -d' ' -f1)
+          echo "$HASH" > "out/package-$VERSION.txt.sha256"
+          echo "SHA-256: $HASH"
+
+          # Hand these values back to the caller.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the built file as evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-package
+          path: out/*

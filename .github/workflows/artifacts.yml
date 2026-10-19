@@ -1,0 +1,22 @@
+  name: Artifacts Practice
+
+  on:
+    workflow_dispatch:
+
+  jobs:
+    make-files:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Create some fake result files
+          run: |
+            mkdir -p out
+            echo "pretend this is a built package" > out/sample.nupkg
+            echo '{"status":"ok","note":"pretend JSON result"}' > out/result.json
+            echo "Files created:"
+            ls -l out
+
+        - name: Upload them as a downloadable bundle
+          uses: actions/upload-artifact@v4
+          with:
+            name: practice-evidence
+            path: out/*

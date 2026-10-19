@@ -1,0 +1,50 @@
+# =============================================================================
+# SIMULATED "thin caller" workflow.
+# Mirrors your real uipath-pipeline.yml: it contains almost no logic itself,
+# it just CALLS the reusable sim-build.yml and then uses what it returns.
+#
+# Real concept being rehearsed:
+#   - A bot repo's caller references a central reusable workflow with "uses:".
+#   - It passes inputs in, gets outputs back, and chains jobs together.
+#   - "permissions: {}" = deny everything by default, grant per job (principle 5).
+# =============================================================================
+
+name: sim-caller
+
+on:
+  workflow_dispatch:             # the manual "Run workflow" button you know
+    inputs:
+      version-mode:
+        description: "release or prerelease"
+        type: choice
+        options: [release, prerelease]
+        default: release
+
+# Deny by default; each job grants only what it needs (least privilege).
+permissions: {}
+
+jobs:
+  # STEP 1: call the central reusable build workflow.
+  # In your real design this line points at another REPO. Here it points at a
+  # file in THIS repo using the local "./" path, which is simpler for practice.
+  call-build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sim-build.yml
+    with:
+      version-mode: ${{ inputs.version-mode }}
+
+  # STEP 2: use the outputs the build handed back.
+  # "needs: call-build" means this waits until the build finishes, and lets us
+  # read its outputs via needs.call-build.outputs.*
+  use-the-result:
+    needs: call-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show what the reusable build returned
+        run: |
+          echo "The central build told me:"
+          echo "  version = ${{ needs.call-build.outputs.package-version }}"
+          echo "  sha256  = ${{ needs.call-build.outputs.sha256 }}"
+          echo ""
+          echo "In the real design, this is where I'd deploy that exact version."

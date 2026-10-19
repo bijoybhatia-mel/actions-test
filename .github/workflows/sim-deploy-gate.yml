@@ -1,0 +1,86 @@
+# =============================================================================
+# SIMULATED environment approval gate.
+# Mirrors your real design's "Prod is never automatic" principle (principle 4)
+# and the uipath-deploy.yml guard rails, using dummy steps so it runs anywhere.
+#
+# Real concept being rehearsed:
+#   - A job bound to "environment: prod" PAUSES and waits for a human reviewer
+#     before it runs (and before any secret would be released).
+#   - Guard-rail checks reject bad inputs BEFORE deploying (fail closed).
+#
+# IMPORTANT ONE-TIME SETUP (do this before running - see the README):
+#   Create a GitHub Environment called "prod" in the repo settings and add
+#   yourself as a Required reviewer. That protection is what makes the pause happen.
+# =============================================================================
+
+name: sim-deploy-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Where to deploy"
+        type: choice
+        options: [dev, uat, prod]
+        default: prod
+      package-version:
+        description: "Version to deploy, e.g. 1.4.57 (or 1.4.57-dev.abc1234 for a pre-release)"
+        type: string
+        default: "1.4.57"
+      change-reference:
+        description: "Change ticket, required for prod (format CHGxxxxxxx)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  # STEP 1: guard rails run FIRST, on a normal runner, with no approval needed.
+  # This mirrors the 'Guard rails' step in your real uipath-deploy.yml: it
+  # rejects bad combinations before anything is deployed (fail closed).
+  guard-rails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the request is allowed
+        run: |
+          TARGET="${{ inputs.environment }}"
+          VERSION="${{ inputs.package-version }}"
+          CHANGE="${{ inputs.change-reference }}"
+          echo "Request: deploy $VERSION to $TARGET (change='$CHANGE')"
+
+          # Rule 1: UAT and Prod must not accept pre-release versions (those contain a '-').
+          case "$TARGET" in
+            uat|prod)
+              case "$VERSION" in
+                *-*) echo "::error::$TARGET rejects pre-release versions ($VERSION). Only released builds allowed."; exit 1 ;;
+              esac
+            ;;
+          esac
+
+          # Rule 2: version must look like 1.2.3 (optionally with a pre-release suffix).
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.\-]+)?$'; then
+            echo "::error::Invalid version format: $VERSION"; exit 1
+          fi
+
+          # Rule 3: prod requires a valid change reference (CHG + 7 digits).
+          if [ "$TARGET" = "prod" ]; then
+            if ! echo "$CHANGE" | grep -Eq '^CHG[0-9]{7}$'; then
+              echo "::error::Prod needs a valid change reference like CHG1234567 (got '$CHANGE')"; exit 1
+            fi
+          fi
+
+          echo "Guard rails passed."
+
+  # STEP 2: the actual deploy. It only starts AFTER guard-rails pass, and because
+  # it is bound to an Environment, GitHub will PAUSE it for reviewer approval
+  # when that environment has a Required reviewer (set 'prod' up that way).
+  deploy:
+    needs: guard-rails
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}     # <-- this line triggers the approval pause
+    steps:
+      - name: Pretend-deploy
+        run: |
+          echo "Approved. Deploying ${{ inputs.package-version }} to ${{ inputs.environment }}..."
+          echo "(In the real design this is where uip login + upload + update-version would run.)"
+          echo "Done."
